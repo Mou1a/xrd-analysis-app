@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -43,14 +44,12 @@ if txt_file and csv_file:
     # ---------------------------------------------------------
     df = pd.read_csv(csv_file, header=None)
     
-    # Find where the Peak data starts
     header_row_idx = -1
     for idx, row in df.iterrows():
         if "2Theta (°)" in str(row.values) or "2Theta" in str(row.values):
             header_row_idx = idx
             break
 
-    # Extract Peak Database
     peaks = {}
     if header_row_idx != -1:
         name_row = df.iloc[header_row_idx - 1]
@@ -82,7 +81,6 @@ if txt_file and csv_file:
                             peaks[current_comp]['2theta'].extend(twotheta_vals)
                             peaks[current_comp]['ifix'].extend(ifix_vals)
 
-    # Attempt to pre-fill Quantitative Data
     pre_fill_data = []
     cryst_val = ""
     
@@ -90,7 +88,6 @@ if txt_file and csv_file:
         for idx in range(header_row_idx):
             row = df.iloc[idx]
             
-            # Look for crystallinity
             if idx == 1 and len(row) > 6:
                 c = str(row[6]).strip()
                 if c.lower() not in ["nan", "crystallinity", "none", ""]:
@@ -100,7 +97,6 @@ if txt_file and csv_file:
                     except ValueError:
                         pass
                         
-            # Look for Compound Data
             if len(row) > 4:
                 comp = str(row[1]).strip()
                 if comp and comp.lower() not in ["nan", "compound name", "none"]:
@@ -128,9 +124,6 @@ if txt_file and csv_file:
 
     df_quant = pd.DataFrame(pre_fill_data)
 
-    # ---------------------------------------------------------
-    # 3. INTERACTIVE UI: DATA EDITOR
-    # ---------------------------------------------------------
     st.markdown("---")
     st.subheader("Quantitative Data Editor")
     st.markdown("Verify the extracted data below. **You can edit cells, delete rows, or add new rows directly in this table.**")
@@ -144,12 +137,8 @@ if txt_file and csv_file:
         }
     )
     
-    # ---------------------------------------------------------
-    # TOGGLE FOR CRYSTALLINITY
-    # ---------------------------------------------------------
     col_c1, col_c2 = st.columns([1, 3])
     with col_c1:
-        # Checkbox defaults to True if we successfully found crystallinity data earlier
         include_cryst = st.checkbox("Show Crystallinity in Plot", value=(cryst_val != ""))
     with col_c2:
         if include_cryst:
@@ -157,9 +146,6 @@ if txt_file and csv_file:
         else:
             cryst_input = ""
 
-    # ---------------------------------------------------------
-    # 4. PLOT SETTINGS SLIDERS
-    # ---------------------------------------------------------
     st.sidebar.header("Plot Settings")
     stick_scale = st.sidebar.slider("Reference Stick Height", min_value=0.1, max_value=1.0, value=0.4, step=0.05)
     base_font = st.sidebar.slider("Text Size", min_value=10, max_value=30, value=18, step=1)
@@ -177,15 +163,11 @@ if txt_file and csv_file:
                 'sq': float(row["S-Q %"])
             })
 
-    # ---------------------------------------------------------
-    # 5. GENERATE PLOT
-    # ---------------------------------------------------------
     if st.button("Generate Figure", type="primary"):
         plt.rcParams['font.family'] = 'Arial'
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8), gridspec_kw={'width_ratios': [2.5, 1]})
         colors = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#17becf', '#ff7f0e']
         
-        # AXIS 1: MAIN SPECTRA
         if len(raw_intensity) > 0:
             max_raw = max(raw_intensity)
             min_raw = min(raw_intensity)
@@ -205,9 +187,10 @@ if txt_file and csv_file:
             
             pdf_str = ""
             for ci in compounds_info:
-                if ci['name'].lower() == comp.lower() and ci['pdf']:
-                    # Put PDF on a new line
-                    pdf_str = f"\n{ci['pdf']}"
+                # IMPORTANT FIX: Loosened the matching logic slightly
+                if ci['name'].strip().lower() in comp.strip().lower() or comp.strip().lower() in ci['name'].strip().lower():
+                    if ci['pdf']:
+                        pdf_str = f"\n{ci['pdf']}"
                     break
             
             label_str = f"{comp}{pdf_str}"
@@ -221,7 +204,6 @@ if txt_file and csv_file:
         ax1.set_yticks([]) 
         ax1.tick_params(axis='x', labelsize=base_font)
         
-        # Set legend font slightly smaller than the base text to save room
         legend_font = max(10, base_font - 2) 
         ax1.legend(fontsize=legend_font, frameon=False, loc='upper right')
         
@@ -229,7 +211,6 @@ if txt_file and csv_file:
         ax1.spines['right'].set_visible(False)
         ax1.spines['left'].set_visible(False)
 
-        # AXIS 2: DONUT CHART
         if len(compounds_info) > 0:
             labels = []
             sizes = []
@@ -251,7 +232,6 @@ if txt_file and csv_file:
             centre_circle = plt.Circle((0,0), 0.50, fc='white')
             ax2.add_artist(centre_circle)
 
-            # Only plot the crystallinity if the checkbox was selected and text isn't empty
             if include_cryst and cryst_input.strip() != "":
                 c_text = cryst_input.strip()
                 if not c_text.endswith("%"):
