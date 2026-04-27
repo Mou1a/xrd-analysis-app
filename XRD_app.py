@@ -43,14 +43,12 @@ if txt_file and csv_file:
     # ---------------------------------------------------------
     df = pd.read_csv(csv_file, header=None)
     
-    # Find where the Peak data starts
     header_row_idx = -1
     for idx, row in df.iterrows():
         if "2Theta (°)" in str(row.values) or "2Theta" in str(row.values):
             header_row_idx = idx
             break
 
-    # Extract Peak Database
     peaks = {}
     if header_row_idx != -1:
         name_row = df.iloc[header_row_idx - 1]
@@ -82,7 +80,6 @@ if txt_file and csv_file:
                             peaks[current_comp]['2theta'].extend(twotheta_vals)
                             peaks[current_comp]['ifix'].extend(ifix_vals)
 
-    # Attempt to pre-fill Quantitative Data
     pre_fill_data = []
     cryst_val = ""
     
@@ -90,18 +87,15 @@ if txt_file and csv_file:
         for idx in range(header_row_idx):
             row = df.iloc[idx]
             
-            # Look for crystallinity
             if idx == 1 and len(row) > 6:
                 c = str(row[6]).strip()
                 if c.lower() not in ["nan", "crystallinity", "none", ""]:
                     try:
                         c_float = float(c)
-                        # Convert fraction to percentage if necessary
                         cryst_val = str(round(c_float * 100 if c_float <= 1.0 else c_float, 2))
                     except ValueError:
                         pass
                         
-            # Look for Compound Data
             if len(row) > 4:
                 comp = str(row[1]).strip()
                 if comp and comp.lower() not in ["nan", "compound name", "none"]:
@@ -113,7 +107,6 @@ if txt_file and csv_file:
                     try:
                         sq_float = float(row[4])
                         if not np.isnan(sq_float):
-                            # Ensure percentage is scaled to 100 (not 1.0)
                             sq_val = sq_float * 100 if sq_float <= 1.0 else sq_float
                             pre_fill_data.append({
                                 "Sample": sample if sample.lower() != "nan" else "",
@@ -125,7 +118,6 @@ if txt_file and csv_file:
                     except (ValueError, TypeError):
                         pass
 
-    # If parsing failed completely, provide an empty structure for the user
     if not pre_fill_data:
         pre_fill_data = [{"Sample": "", "Compound Name": "", "Formula": "", "PDF Name": "", "S-Q %": 0.0}]
 
@@ -138,7 +130,6 @@ if txt_file and csv_file:
     st.subheader("Quantitative Data Editor")
     st.markdown("Verify the extracted data below. **You can edit cells, delete rows, or add new rows directly in this table.**")
     
-    # The editable table
     edited_df = st.data_editor(
         df_quant, 
         num_rows="dynamic", 
@@ -148,7 +139,6 @@ if txt_file and csv_file:
         }
     )
     
-    # Standalone Crystallinity Box
     cryst_input = st.text_input("Crystallinity (%)", value=cryst_val, help="Leave blank if not applicable.")
 
     # ---------------------------------------------------------
@@ -161,7 +151,6 @@ if txt_file and csv_file:
     title_font = base_font + 4
     cryst_font = base_font + 2
 
-    # Parse edited DataFrame back into our plotting list
     compounds_info = []
     for idx, row in edited_df.iterrows():
         name = str(row["Compound Name"]).strip()
@@ -188,79 +177,4 @@ if txt_file and csv_file:
             max_raw, min_raw = 100, 0
             
         max_ifix = max([max(data['ifix']) for data in peaks.values() if len(data['ifix']) > 0] + [1])
-        stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw else 50
-        offset = stick_max_height * 1.1 - min_raw if max_raw > min_raw else 5
-
-        ax1.plot(raw_2theta, [val + offset for val in raw_intensity], color='black', label='Raw Data', linewidth=1.5)
-
-        for i, (comp, data) in enumerate(peaks.items()):
-            c = colors[i % len(colors)]
-            x = data['2theta']
-            y = [val / max_ifix * stick_max_height for val in data['ifix']]
-            
-            pdf_str = ""
-            for ci in compounds_info:
-                if ci['name'].lower() == comp.lower() and ci['pdf']:
-                    pdf_str = f" - {ci['pdf']}"
-                    break
-            
-            label_str = f"{comp}{pdf_str}"
-            ax1.plot([], [], color=c, label=label_str, linewidth=3)
-            ax1.vlines(x, ymin=0, ymax=y, color=c, linewidth=2.0)
-
-        ax1.set_xlabel('2$\\theta$ Angle (degrees)', fontsize=title_font, fontweight='bold')
-        ax1.set_ylabel('Normalized Intensity', fontsize=title_font, fontweight='bold')
-        ax1.set_xlim([min(raw_2theta) if raw_2theta else 5, max(raw_2theta) if raw_2theta else 80])
-        ax1.set_ylim(bottom=0)
-        ax1.set_yticks([]) 
-        ax1.tick_params(axis='x', labelsize=base_font)
-        ax1.legend(fontsize=base_font, frameon=False, loc='upper right')
-        ax1.spines['top'].set_visible(False)
-        ax1.spines['right'].set_visible(False)
-        ax1.spines['left'].set_visible(False)
-
-        # AXIS 2: DONUT CHART
-        if len(compounds_info) > 0:
-            labels = []
-            sizes = []
-            for comp in compounds_info:
-                name_part = comp['name'].replace(" (", "\n(")
-                labels.append(name_part)
-                sizes.append(comp['sq'])
-                
-            colors_donut = colors[:len(labels)]
-            
-            wedges, texts, autotexts = ax2.pie(
-                sizes, labels=labels, autopct='%1.1f%%', 
-                startangle=90, colors=colors_donut, 
-                textprops={'fontsize': base_font, 'fontweight': 'bold'},
-                labeldistance=1.1,
-                pctdistance=0.75
-            )
-
-            centre_circle = plt.Circle((0,0), 0.50, fc='white')
-            ax2.add_artist(centre_circle)
-
-            if cryst_input.strip() != "":
-                # Add % sign if the user just typed a number
-                c_text = cryst_input.strip()
-                if not c_text.endswith("%"):
-                    c_text += "%"
-                ax2.text(0, 0, f"Crystallinity:\n{c_text}", ha='center', va='center', fontsize=cryst_font, fontweight='bold')
-
-            ax2.axis('equal')
-        else:
-            ax2.text(0.5, 0.5, "No Quantitative Data Provided", ha='center', va='center', fontsize=base_font)
-            ax2.axis('off')
-
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
-        st.download_button(
-            label="Download High-Res PNG",
-            data=buf.getvalue(),
-            file_name="XRD_Combined_Analysis.png",
-            mime="image/png"
-        )
+        stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw
