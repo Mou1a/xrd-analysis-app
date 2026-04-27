@@ -177,4 +177,82 @@ if txt_file and csv_file:
             max_raw, min_raw = 100, 0
             
         max_ifix = max([max(data['ifix']) for data in peaks.values() if len(data['ifix']) > 0] + [1])
-        stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw
+        stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw else 50
+        offset = stick_max_height * 1.1 - min_raw if max_raw > min_raw else 5
+
+        ax1.plot(raw_2theta, [val + offset for val in raw_intensity], color='black', label='Raw Data', linewidth=1.5)
+
+        for i, (comp, data) in enumerate(peaks.items()):
+            c = colors[i % len(colors)]
+            x = data['2theta']
+            y = [val / max_ifix * stick_max_height for val in data['ifix']]
+            
+            pdf_str = ""
+            for ci in compounds_info:
+                if ci['name'].lower() == comp.lower() and ci['pdf']:
+                    # -------- UPDATED HERE: Moved PDF to a new line! --------
+                    pdf_str = f"\n{ci['pdf']}"
+                    break
+            
+            label_str = f"{comp}{pdf_str}"
+            ax1.plot([], [], color=c, label=label_str, linewidth=3)
+            ax1.vlines(x, ymin=0, ymax=y, color=c, linewidth=2.0)
+
+        ax1.set_xlabel('2$\\theta$ Angle (degrees)', fontsize=title_font, fontweight='bold')
+        ax1.set_ylabel('Normalized Intensity', fontsize=title_font, fontweight='bold')
+        ax1.set_xlim([min(raw_2theta) if raw_2theta else 5, max(raw_2theta) if raw_2theta else 80])
+        ax1.set_ylim(bottom=0)
+        ax1.set_yticks([]) 
+        ax1.tick_params(axis='x', labelsize=base_font)
+        
+        # Legend sizing remains tied to your slider
+        ax1.legend(fontsize=base_font, frameon=False, loc='upper right')
+        
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        ax1.spines['left'].set_visible(False)
+
+        # AXIS 2: DONUT CHART
+        if len(compounds_info) > 0:
+            labels = []
+            sizes = []
+            for comp in compounds_info:
+                name_part = comp['name'].replace(" (", "\n(")
+                labels.append(name_part)
+                sizes.append(comp['sq'])
+                
+            colors_donut = colors[:len(labels)]
+            
+            wedges, texts, autotexts = ax2.pie(
+                sizes, labels=labels, autopct='%1.1f%%', 
+                startangle=90, colors=colors_donut, 
+                textprops={'fontsize': base_font, 'fontweight': 'bold'},
+                labeldistance=1.1,
+                pctdistance=0.75
+            )
+
+            centre_circle = plt.Circle((0,0), 0.50, fc='white')
+            ax2.add_artist(centre_circle)
+
+            if cryst_input.strip() != "":
+                c_text = cryst_input.strip()
+                if not c_text.endswith("%"):
+                    c_text += "%"
+                ax2.text(0, 0, f"Crystallinity:\n{c_text}", ha='center', va='center', fontsize=cryst_font, fontweight='bold')
+
+            ax2.axis('equal')
+        else:
+            ax2.text(0.5, 0.5, "No Quantitative Data Provided", ha='center', va='center', fontsize=base_font)
+            ax2.axis('off')
+
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+        st.download_button(
+            label="Download High-Res PNG",
+            data=buf.getvalue(),
+            file_name="XRD_Combined_Analysis.png",
+            mime="image/png"
+        )
