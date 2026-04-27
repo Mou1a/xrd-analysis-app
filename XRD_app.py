@@ -43,12 +43,14 @@ if txt_file and csv_file:
     # ---------------------------------------------------------
     df = pd.read_csv(csv_file, header=None)
     
+    # Find where the Peak data starts
     header_row_idx = -1
     for idx, row in df.iterrows():
         if "2Theta (°)" in str(row.values) or "2Theta" in str(row.values):
             header_row_idx = idx
             break
 
+    # Extract Peak Database
     peaks = {}
     if header_row_idx != -1:
         name_row = df.iloc[header_row_idx - 1]
@@ -80,6 +82,7 @@ if txt_file and csv_file:
                             peaks[current_comp]['2theta'].extend(twotheta_vals)
                             peaks[current_comp]['ifix'].extend(ifix_vals)
 
+    # Attempt to pre-fill Quantitative Data
     pre_fill_data = []
     cryst_val = ""
     
@@ -87,6 +90,7 @@ if txt_file and csv_file:
         for idx in range(header_row_idx):
             row = df.iloc[idx]
             
+            # Look for crystallinity
             if idx == 1 and len(row) > 6:
                 c = str(row[6]).strip()
                 if c.lower() not in ["nan", "crystallinity", "none", ""]:
@@ -96,6 +100,7 @@ if txt_file and csv_file:
                     except ValueError:
                         pass
                         
+            # Look for Compound Data
             if len(row) > 4:
                 comp = str(row[1]).strip()
                 if comp and comp.lower() not in ["nan", "compound name", "none"]:
@@ -139,7 +144,18 @@ if txt_file and csv_file:
         }
     )
     
-    cryst_input = st.text_input("Crystallinity (%)", value=cryst_val, help="Leave blank if not applicable.")
+    # ---------------------------------------------------------
+    # TOGGLE FOR CRYSTALLINITY
+    # ---------------------------------------------------------
+    col_c1, col_c2 = st.columns([1, 3])
+    with col_c1:
+        # Checkbox defaults to True if we successfully found crystallinity data earlier
+        include_cryst = st.checkbox("Show Crystallinity in Plot", value=(cryst_val != ""))
+    with col_c2:
+        if include_cryst:
+            cryst_input = st.text_input("Crystallinity (%)", value=cryst_val)
+        else:
+            cryst_input = ""
 
     # ---------------------------------------------------------
     # 4. PLOT SETTINGS SLIDERS
@@ -190,7 +206,7 @@ if txt_file and csv_file:
             pdf_str = ""
             for ci in compounds_info:
                 if ci['name'].lower() == comp.lower() and ci['pdf']:
-                    # -------- UPDATED HERE: Moved PDF to a new line! --------
+                    # Put PDF on a new line
                     pdf_str = f"\n{ci['pdf']}"
                     break
             
@@ -205,8 +221,9 @@ if txt_file and csv_file:
         ax1.set_yticks([]) 
         ax1.tick_params(axis='x', labelsize=base_font)
         
-        # Legend sizing remains tied to your slider
-        ax1.legend(fontsize=base_font, frameon=False, loc='upper right')
+        # Set legend font slightly smaller than the base text to save room
+        legend_font = max(10, base_font - 2) 
+        ax1.legend(fontsize=legend_font, frameon=False, loc='upper right')
         
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
@@ -234,7 +251,8 @@ if txt_file and csv_file:
             centre_circle = plt.Circle((0,0), 0.50, fc='white')
             ax2.add_artist(centre_circle)
 
-            if cryst_input.strip() != "":
+            # Only plot the crystallinity if the checkbox was selected and text isn't empty
+            if include_cryst and cryst_input.strip() != "":
                 c_text = cryst_input.strip()
                 if not c_text.endswith("%"):
                     c_text += "%"
