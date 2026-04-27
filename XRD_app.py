@@ -1,31 +1,26 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import io
 
-# Setup the browser tab title and page width
 st.set_page_config(page_title="XRD Analysis App", layout="wide")
 
 st.title("XRD Plotter & Quantitative Analysis")
 st.markdown("Upload your raw XRD text file and the exported CSV database file to generate a combined spectra and donut chart.")
 
-# Create two columns for the drag-and-drop file uploaders
 col1, col2 = st.columns(2)
-
 with col1:
     txt_file = st.file_uploader("1. Upload Raw XRD Data (.txt)", type=['txt'])
-
 with col2:
     csv_file = st.file_uploader("2. Upload Database Export (.csv)", type=['csv'])
 
-# Only run the code once both files have been uploaded by the user
 if txt_file and csv_file:
     st.success("Files loaded successfully. Generating plot...")
     
-    # 1. Parse TXT (reading from the uploaded file stream)
+    # 1. Parse TXT
     raw_2theta = []
     raw_intensity = []
-    
     lines = txt_file.getvalue().decode("utf-8", errors="ignore").splitlines()
     data_started = False
     for line in lines:
@@ -40,30 +35,43 @@ if txt_file and csv_file:
                     raw_intensity.append(float(parts[1]))
                 except ValueError:
                     pass
-                    
-    # 2. Parse CSV (reading from the uploaded file stream)
+    
+    # 2. Parse CSV (BULLETPROOF PARSING)
     df = pd.read_csv(csv_file, header=None)
     
     compounds_info = []
     crystallinity = None
     
+    # A. Extract Quantitative Data (S-Q% and PDF)
     for idx, row in df.iterrows():
-        if str(row[0]).strip() == "Sample":
-            continue
-        if pd.notna(row[1]) and "Compound Name" not in str(row[1]):
-            comp = str(row[1]).strip()
-            pdf = str(row[3]).strip() if pd.notna(row[3]) else ""
-            sq = row[4]
-            if pd.notna(row[6]) and idx == 1:
-                crystallinity = row[6]
-            if pd.notna(sq):
+        if "2Theta" in str(row.values):
+            break # Stop searching when we hit the peak data section
+        
+        # Extract Crystallinity Safely
+        if len(row) > 6:
+            c_val = str(row[6]).strip()
+            if c_val and c_val.lower() not in ["nan", "crystallinity", "none"]:
                 try:
-                    compounds_info.append({'name': comp, 'pdf': pdf, 'sq': float(sq)})
-                except:
+                    crystallinity = float(c_val)
+                except ValueError:
                     pass
-        if idx > 15:
-            break
-            
+                    
+        # Extract S-Q and PDF Safely
+        if len(row) > 4:
+            comp = str(row[1]).strip()
+            if comp and comp.lower() not in ["nan", "compound name", "none", "sample"]:
+                pdf = str(row[3]).strip() if pd.notna(row[3]) else ""
+                if pdf.lower() == "nan": 
+                    pdf = ""
+                
+                try:
+                    sq_float = float(row[4])
+                    if not np.isnan(sq_float):
+                        compounds_info.append({'name': comp, 'pdf': pdf, 'sq': sq_float})
+                except (ValueError, TypeError):
+                    pass
+
+    # B. Extract Peak Database
     header_row_idx = -1
     for idx, row in df.iterrows():
         if "2Theta (°)" in str(row.values) or "2Theta" in str(row.values):
@@ -93,7 +101,7 @@ if txt_file and csv_file:
                         try:
                             twotheta_vals.append(float(tt))
                             ifix_vals.append(float(ifix))
-                        except:
+                        except ValueError:
                             pass
                     if current_comp and len(twotheta_vals) > 0:
                         if current_comp not in peaks:
@@ -102,16 +110,23 @@ if txt_file and csv_file:
                             peaks[current_comp]['2theta'].extend(twotheta_vals)
                             peaks[current_comp]['ifix'].extend(ifix_vals)
 
-    # Adding a Sidebar Slider so the user can tweak the stick height dynamically
+    # 3. INTERACTIVE SLIDERS
     st.sidebar.header("Plot Settings")
-    stick_scale = st.sidebar.slider("Reference Stick Height (Relative to raw data)", min_value=0.1, max_value=1.0, value=0.4, step=0.05)
+    stick_scale = st.sidebar.slider("Reference Stick Height", min_value=0.1, max_value=1.0, value=0.4, step=0.05)
     
-    # 3. Create Figure
+    # NEW: Text Size Slider
+    base_font = st.sidebar.slider("Text Size", min_value=10, max_value=30, value=18, step=1)
+    
+    # Calculate proportional font sizes based on the slider
+    title_font = base_font + 4
+    cryst_font = base_font + 2
+
+    # 4. PLOTTING
     plt.rcParams['font.family'] = 'Arial'
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8), gridspec_kw={'width_ratios': [2.5, 1]})
     colors = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#17becf', '#ff7f0e']
     
-    # ---------------- AXIS 1: MAIN XRD SPECTRA ----------------
+    # AXIS 1: MAIN SPECTRA
     if len(raw_intensity) > 0:
         max_raw = max(raw_intensity)
         min_raw = min(raw_intensity)
@@ -119,8 +134,6 @@ if txt_file and csv_file:
         max_raw, min_raw = 100, 0
         
     max_ifix = max([max(data['ifix']) for data in peaks.values() if len(data['ifix']) > 0] + [1])
-    
-    # Use the variable from the Streamlit slider to adjust the stick height
     stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw else 50
     offset = stick_max_height * 1.1 - min_raw if max_raw > min_raw else 5
 
@@ -133,7 +146,8 @@ if txt_file and csv_file:
         
         pdf_str = ""
         for ci in compounds_info:
-            if ci['name'] == comp and ci['pdf']:
+            # Lowercase comparison prevents minor spacing mismatches from hiding the PDF
+            if ci['name'].lower() == comp.lower() and ci['pdf']:
                 pdf_str = f" - {ci['pdf']}"
                 break
         
@@ -141,18 +155,19 @@ if txt_file and csv_file:
         ax1.plot([], [], color=c, label=label_str, linewidth=3)
         ax1.vlines(x, ymin=0, ymax=y, color=c, linewidth=2.0)
 
-    ax1.set_xlabel('2$\\theta$ Angle (degrees)', fontsize=22, fontweight='bold')
-    ax1.set_ylabel('Normalized Intensity', fontsize=22, fontweight='bold')
+    # Apply dynamic font sizing to Axis 1
+    ax1.set_xlabel('2$\\theta$ Angle (degrees)', fontsize=title_font, fontweight='bold')
+    ax1.set_ylabel('Normalized Intensity', fontsize=title_font, fontweight='bold')
     ax1.set_xlim([min(raw_2theta) if raw_2theta else 5, max(raw_2theta) if raw_2theta else 80])
     ax1.set_ylim(bottom=0)
     ax1.set_yticks([]) 
-    ax1.tick_params(axis='x', labelsize=18)
-    ax1.legend(fontsize=18, frameon=False, loc='upper right')
+    ax1.tick_params(axis='x', labelsize=base_font)
+    ax1.legend(fontsize=base_font, frameon=False, loc='upper right')
     ax1.spines['top'].set_visible(False)
     ax1.spines['right'].set_visible(False)
     ax1.spines['left'].set_visible(False)
 
-    # ---------------- AXIS 2: QUANTITATIVE DONUT CHART ----------------
+    # AXIS 2: DONUT CHART
     if len(compounds_info) > 0:
         labels = []
         for comp in compounds_info:
@@ -162,10 +177,11 @@ if txt_file and csv_file:
         sizes = [comp['sq'] * 100 if comp['sq'] <= 1.0 else comp['sq'] for comp in compounds_info] 
         colors_donut = colors[:len(labels)]
         
+        # Apply dynamic font sizing to Pie Chart
         wedges, texts, autotexts = ax2.pie(
             sizes, labels=labels, autopct='%1.1f%%', 
             startangle=90, colors=colors_donut, 
-            textprops={'fontsize': 18, 'fontweight': 'bold'},
+            textprops={'fontsize': base_font, 'fontweight': 'bold'},
             labeldistance=1.1,
             pctdistance=0.75
         )
@@ -179,18 +195,18 @@ if txt_file and csv_file:
                 cryst_text = f"Crystallinity:\n{cryst_val:.1f}%"
             except:
                 cryst_text = f"Crystallinity:\n{crystallinity}"
-            ax2.text(0, 0, cryst_text, ha='center', va='center', fontsize=20, fontweight='bold')
+            # Apply dynamic font sizing to Crystallinity
+            ax2.text(0, 0, cryst_text, ha='center', va='center', fontsize=cryst_font, fontweight='bold')
 
         ax2.axis('equal')
     else:
+        # Fallback text so the axis doesn't look broken if data is ever missing
+        ax2.text(0.5, 0.5, "Quantitative Data Not Found", ha='center', va='center', fontsize=base_font)
         ax2.axis('off')
 
     plt.tight_layout()
-    
-    # Render the matplotlib figure directly inside the Streamlit web browser
     st.pyplot(fig)
     
-    # Render a download button underneath the plot to save the high-res PNG
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
     st.download_button(
