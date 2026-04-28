@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import io
 import re
+import textwrap
 
 st.set_page_config(page_title="XRD Analysis App", layout="wide")
 
@@ -17,7 +18,6 @@ with col2:
     csv_file = st.file_uploader("2. Upload Database Export (.csv)", type=['csv'])
 
 def simplify_text(text):
-    # This strips ALL spaces, symbols, and capitals so matching is bulletproof
     return re.sub(r'[^a-zA-Z0-9]', '', str(text).lower())
 
 if txt_file and csv_file:
@@ -209,25 +209,35 @@ if txt_file and csv_file:
             comp_simple = simplify_text(comp)
             for ci in compounds_info:
                 ci_name_simple = simplify_text(ci['name'])
-                # Bulletproof matching! As long as the alphanumeric characters intersect, it maps the PDF.
                 if len(ci_name_simple) > 2 and (ci_name_simple in comp_simple or comp_simple in ci_name_simple):
                     if ci['pdf']:
                         pdf_str = f"\n{ci['pdf']}"
                     break
             
-            label_str = f"{comp}{pdf_str}"
+            # --- FIXED LEGEND TEXT ---
+            # Wrap long compound names (stops at 30 characters and drops to next line)
+            wrapped_comp = "\n".join(textwrap.wrap(comp, width=30))
+            label_str = f"{wrapped_comp}{pdf_str}"
+            
             ax1.plot([], [], color=c, label=label_str, linewidth=3)
             ax1.vlines(x, ymin=0, ymax=y, color=c, linewidth=2.0)
 
         ax1.set_xlabel('2$\\theta$ Angle (degrees)', fontsize=title_font, fontweight='bold')
         ax1.set_ylabel('Normalized Intensity', fontsize=title_font, fontweight='bold')
         ax1.set_xlim([min(raw_2theta) if raw_2theta else 5, max(raw_2theta) if raw_2theta else 80])
-        ax1.set_ylim(bottom=0)
+        
+        # --- FIXED HEADROOM ---
+        # Add 25% empty space at the top of the plot to prevent legend overlap
+        highest_plot_point = max_raw + offset
+        ax1.set_ylim(bottom=0, top=highest_plot_point * 1.25)
+        
         ax1.set_yticks([]) 
         ax1.tick_params(axis='x', labelsize=base_font)
         
+        # --- FIXED LEGEND PADDING ---
         legend_font = max(10, base_font - 2) 
-        ax1.legend(fontsize=legend_font, frameon=False, loc='upper right')
+        # labelspacing=1.5 adds vertical breathing room between multiline items
+        ax1.legend(fontsize=legend_font, frameon=False, loc='upper right', labelspacing=1.5)
         
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
@@ -237,7 +247,9 @@ if txt_file and csv_file:
             labels = []
             sizes = []
             for comp in compounds_info:
+                # Keep pie chart labels reasonably wrapped too
                 name_part = comp['name'].replace(" (", "\n(")
+                name_part = "\n".join(textwrap.wrap(name_part, width=25))
                 labels.append(name_part)
                 sizes.append(comp['sq'])
                 
