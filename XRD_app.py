@@ -1,9 +1,9 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import io
+import re
 
 st.set_page_config(page_title="XRD Analysis App", layout="wide")
 
@@ -15,6 +15,10 @@ with col1:
     txt_file = st.file_uploader("1. Upload Raw XRD Data (.txt)", type=['txt'])
 with col2:
     csv_file = st.file_uploader("2. Upload Database Export (.csv)", type=['csv'])
+
+def simplify_text(text):
+    # This strips ALL spaces, symbols, and capitals so matching is bulletproof
+    return re.sub(r'[^a-zA-Z0-9]', '', str(text).lower())
 
 if txt_file and csv_file:
     st.success("Files loaded successfully.")
@@ -40,16 +44,18 @@ if txt_file and csv_file:
                     pass
     
     # ---------------------------------------------------------
-    # 2. PARSE CSV (Peaks + Attempted Quant Extraction)
+    # 2. PARSE CSV (Peaks + Robust Quant Extraction)
     # ---------------------------------------------------------
     df = pd.read_csv(csv_file, header=None)
     
     header_row_idx = -1
     for idx, row in df.iterrows():
-        if "2Theta (°)" in str(row.values) or "2Theta" in str(row.values):
+        row_strs = [str(x).strip().lower() for x in row.values]
+        if "2theta (°)" in row_strs or "2theta" in "".join(row_strs):
             header_row_idx = idx
             break
 
+    # Extract Peak Database
     peaks = {}
     if header_row_idx != -1:
         name_row = df.iloc[header_row_idx - 1]
@@ -60,8 +66,8 @@ if txt_file and csv_file:
             if pd.notna(name_row[col_idx]) and str(name_row[col_idx]).strip() != "":
                 current_comp = str(name_row[col_idx]).strip()
             
-            if "2Theta" in str(header_row[col_idx]):
-                if col_idx + 1 < len(header_row) and "I fix" in str(header_row[col_idx + 1]):
+            if "2theta" in str(header_row[col_idx]).lower():
+                if col_idx + 1 < len(header_row) and "i fix" in str(header_row[col_idx + 1]).lower():
                     twotheta_vals = []
                     ifix_vals = []
                     for val_idx in range(header_row_idx + 1, len(df)):
@@ -81,49 +87,63 @@ if txt_file and csv_file:
                             peaks[current_comp]['2theta'].extend(twotheta_vals)
                             peaks[current_comp]['ifix'].extend(ifix_vals)
 
+    # Dynamic Extraction for Quantitative Data
     pre_fill_data = []
     cryst_val = ""
     
-    if header_row_idx > 0:
-        for idx in range(header_row_idx):
-            row = df.iloc[idx]
+    comp_col, pdf_col, sq_col, cryst_col = 1, 3, 4, 6
+    found_header = False
+    
+    for idx in range(max(1, header_row_idx if header_row_idx != -1 else len(df))):
+        row_strs = [str(x).strip().lower() for x in df.iloc[idx].values]
+        if "compound name" in row_strs:
+            found_header = True
+            comp_col = row_strs.index("compound name")
+            if "pdf name" in row_strs: pdf_col = row_strs.index("pdf name")
+            if "s-q %" in row_strs: sq_col = row_strs.index("s-q %")
+            if "crystallinity" in row_strs: cryst_col = row_strs.index("crystallinity")
             
-            if idx == 1 and len(row) > 6:
-                c = str(row[6]).strip()
-                if c.lower() not in ["nan", "crystallinity", "none", ""]:
+            for j in range(idx + 1, header_row_idx if header_row_idx != -1 else len(df)):
+                data_row = df.iloc[j]
+                
+                if "2theta" in "".join([str(x).lower() for x in data_row.values]):
+                    break
+                    
+                comp = str(data_row[comp_col]).strip() if comp_col < len(data_row) else ""
+                if comp and comp.lower() not in ["nan", "none", ""]:
+                    pdf = str(data_row[pdf_col]).strip() if pdf_col < len(data_row) else ""
+                    if pdf.lower() == "nan": pdf = ""
+                    
+                    sq_str = str(data_row[sq_col]).strip() if sq_col < len(data_row) else ""
                     try:
-                        c_float = float(c)
+                        sq_float = float(sq_str)
+                        sq_val = sq_float * 100 if sq_float <= 1.0 else sq_float
+                    except ValueError:
+                        sq_val = 0.0
+                        
+                    pre_fill_data.append({
+                        "Compound Name": comp,
+                        "PDF Name": pdf,
+                        "S-Q %": sq_val
+                    })
+                    
+                c_str = str(data_row[cryst_col]).strip() if cryst_col < len(data_row) else ""
+                if c_str and c_str.lower() not in ["nan", "none", ""]:
+                    try:
+                        c_float = float(c_str)
                         cryst_val = str(round(c_float * 100 if c_float <= 1.0 else c_float, 2))
                     except ValueError:
                         pass
-                        
-            if len(row) > 4:
-                comp = str(row[1]).strip()
-                if comp and comp.lower() not in ["nan", "compound name", "none"]:
-                    sample = str(row[0]).strip() if pd.notna(row[0]) else ""
-                    formula = str(row[2]).strip() if pd.notna(row[2]) else ""
-                    pdf = str(row[3]).strip() if pd.notna(row[3]) else ""
-                    if pdf.lower() == "nan": pdf = ""
-                    
-                    try:
-                        sq_float = float(row[4])
-                        if not np.isnan(sq_float):
-                            sq_val = sq_float * 100 if sq_float <= 1.0 else sq_float
-                            pre_fill_data.append({
-                                "Sample": sample if sample.lower() != "nan" else "",
-                                "Compound Name": comp,
-                                "Formula": formula if formula.lower() != "nan" else "",
-                                "PDF Name": pdf,
-                                "S-Q %": sq_val
-                            })
-                    except (ValueError, TypeError):
-                        pass
+            break
 
     if not pre_fill_data:
-        pre_fill_data = [{"Sample": "", "Compound Name": "", "Formula": "", "PDF Name": "", "S-Q %": 0.0}]
+        pre_fill_data = [{"Compound Name": "", "PDF Name": "", "S-Q %": 0.0}]
 
     df_quant = pd.DataFrame(pre_fill_data)
 
+    # ---------------------------------------------------------
+    # 3. INTERACTIVE UI: DATA EDITOR
+    # ---------------------------------------------------------
     st.markdown("---")
     st.subheader("Quantitative Data Editor")
     st.markdown("Verify the extracted data below. **You can edit cells, delete rows, or add new rows directly in this table.**")
@@ -159,7 +179,7 @@ if txt_file and csv_file:
         if name and name.lower() != "nan" and row["S-Q %"] > 0:
             compounds_info.append({
                 'name': name,
-                'pdf': str(row["PDF Name"]).strip() if pd.notna(row["PDF Name"]) and str(row["PDF Name"]).lower() != "nan" else "",
+                'pdf': str(row["PDF Name"]).strip() if pd.notna(row["PDF Name"]) and str(row["PDF Name"]).lower() not in ["nan", "none"] else "",
                 'sq': float(row["S-Q %"])
             })
 
@@ -186,9 +206,11 @@ if txt_file and csv_file:
             y = [val / max_ifix * stick_max_height for val in data['ifix']]
             
             pdf_str = ""
+            comp_simple = simplify_text(comp)
             for ci in compounds_info:
-                # IMPORTANT FIX: Loosened the matching logic slightly
-                if ci['name'].strip().lower() in comp.strip().lower() or comp.strip().lower() in ci['name'].strip().lower():
+                ci_name_simple = simplify_text(ci['name'])
+                # Bulletproof matching! As long as the alphanumeric characters intersect, it maps the PDF.
+                if len(ci_name_simple) > 2 and (ci_name_simple in comp_simple or comp_simple in ci_name_simple):
                     if ci['pdf']:
                         pdf_str = f"\n{ci['pdf']}"
                     break
