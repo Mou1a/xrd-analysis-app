@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import io
 import re
-import textwrap
 
 st.set_page_config(page_title="XRD Analysis App", layout="wide")
 
@@ -198,7 +197,16 @@ if txt_file and csv_file:
         stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw else 50
         offset = stick_max_height * 1.1 - min_raw if max_raw > min_raw else 5
 
-        ax1.plot(raw_2theta, [val + offset for val in raw_intensity], color='black', label='Raw Data', linewidth=1.5)
+        # --- FIX: Reduced line thickness for raw data to 1.0 ---
+        ax1.plot(raw_2theta, [val + offset for val in raw_intensity], color='black', label='Raw Data', linewidth=1.0)
+
+        # We will collect the legend handles and labels manually so we can place them globally
+        legend_handles = []
+        legend_labels = []
+
+        raw_handle = plt.Line2D([0], [0], color='black', linewidth=1.0)
+        legend_handles.append(raw_handle)
+        legend_labels.append('Raw Data')
 
         for i, (comp, data) in enumerate(peaks.items()):
             c = colors[i % len(colors)]
@@ -211,45 +219,37 @@ if txt_file and csv_file:
                 ci_name_simple = simplify_text(ci['name'])
                 if len(ci_name_simple) > 2 and (ci_name_simple in comp_simple or comp_simple in ci_name_simple):
                     if ci['pdf']:
-                        pdf_str = f"\n{ci['pdf']}"
+                        # --- FIX: Keep PDF on one line ---
+                        pdf_str = f" - {ci['pdf']}"
                     break
             
-            # --- FIXED LEGEND TEXT ---
-            # Wrap long compound names (stops at 30 characters and drops to next line)
-            wrapped_comp = "\n".join(textwrap.wrap(comp, width=30))
-            label_str = f"{wrapped_comp}{pdf_str}"
+            label_str = f"{comp}{pdf_str}"
+            proxy = plt.Line2D([0], [0], color=c, linewidth=3)
+            legend_handles.append(proxy)
+            legend_labels.append(label_str)
             
-            ax1.plot([], [], color=c, label=label_str, linewidth=3)
             ax1.vlines(x, ymin=0, ymax=y, color=c, linewidth=2.0)
 
         ax1.set_xlabel('2$\\theta$ Angle (degrees)', fontsize=title_font, fontweight='bold')
         ax1.set_ylabel('Normalized Intensity', fontsize=title_font, fontweight='bold')
         ax1.set_xlim([min(raw_2theta) if raw_2theta else 5, max(raw_2theta) if raw_2theta else 80])
         
-        # --- FIXED HEADROOM ---
-        # Add 25% empty space at the top of the plot to prevent legend overlap
         highest_plot_point = max_raw + offset
-        ax1.set_ylim(bottom=0, top=highest_plot_point * 1.25)
+        ax1.set_ylim(bottom=0, top=highest_plot_point * 1.1)
         
         ax1.set_yticks([]) 
         ax1.tick_params(axis='x', labelsize=base_font)
-        
-        # --- FIXED LEGEND PADDING ---
-        legend_font = max(10, base_font - 2) 
-        # labelspacing=1.5 adds vertical breathing room between multiline items
-        ax1.legend(fontsize=legend_font, frameon=False, loc='upper right', labelspacing=1.5)
         
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
         ax1.spines['left'].set_visible(False)
 
+        # AXIS 2: DONUT CHART
         if len(compounds_info) > 0:
             labels = []
             sizes = []
             for comp in compounds_info:
-                # Keep pie chart labels reasonably wrapped too
                 name_part = comp['name'].replace(" (", "\n(")
-                name_part = "\n".join(textwrap.wrap(name_part, width=25))
                 labels.append(name_part)
                 sizes.append(comp['sq'])
                 
@@ -277,7 +277,19 @@ if txt_file and csv_file:
             ax2.text(0.5, 0.5, "No Quantitative Data Provided", ha='center', va='center', fontsize=base_font)
             ax2.axis('off')
 
-        plt.tight_layout()
+        # --- FIX: Move Legend to Bottom Right Corner of Figure ---
+        legend_font = max(10, base_font - 2) 
+        fig.legend(
+            legend_handles, legend_labels, 
+            fontsize=legend_font, 
+            frameon=False, 
+            loc='lower right', 
+            bbox_to_anchor=(0.95, 0.05)
+        )
+
+        # Create space at the bottom for the new legend
+        plt.subplots_adjust(bottom=0.25)
+        
         st.pyplot(fig)
         
         buf = io.BytesIO()
