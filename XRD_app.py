@@ -153,7 +153,6 @@ if txt_file and csv_file:
             "S-Q %": best_sq
         })
 
-    # Add any extra quantitative data (like Amorphous) that has no peak sticks
     for q in df_quant_raw:
         if q["name"] not in assigned_q:
             pre_fill_data.append({
@@ -209,8 +208,17 @@ if txt_file and csv_file:
     if st.button("Generate Figure", type="primary"):
         plt.rcParams['font.family'] = 'Arial'
         
-        # INCREASED HEIGHT to stretch the aspect ratio 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, fig_height), gridspec_kw={'width_ratios': [2.5, 1]})
+        fig = plt.figure(figsize=(16, fig_height))
+        # --- NEW GEOMETRY ---
+        # 2 rows, 2 columns. 
+        # Column 0 is the spectra. Column 1 is the donut (top) and legend (bottom).
+        gs = fig.add_gridspec(2, 2, width_ratios=[2.5, 1], height_ratios=[3, 1], wspace=0.1, hspace=0.3)
+        
+        # ax1 spans both rows on the left side
+        ax1 = fig.add_subplot(gs[:, 0])
+        # ax2 is locked into the top right cell
+        ax2 = fig.add_subplot(gs[0, 1])
+
         colors = ['#d62728', '#1f77b4', '#2ca02c', '#9467bd', '#17becf', '#ff7f0e', '#8c564b', '#e377c2']
         
         if len(raw_intensity) > 0:
@@ -223,7 +231,6 @@ if txt_file and csv_file:
         stick_max_height = (max_raw - min_raw) * stick_scale if max_raw > min_raw else 50
         offset = stick_max_height * 1.1 - min_raw if max_raw > min_raw else 5
 
-        # Plot Raw Data with adjustable line width
         ax1.plot(raw_2theta, [val + offset for val in raw_intensity], color='black', label='Raw Data', linewidth=raw_lw)
 
         legend_handles = []
@@ -238,7 +245,6 @@ if txt_file and csv_file:
 
         color_idx = 0
 
-        # Loop purely over the Data Editor Table to build the plot
         for idx, row in edited_df.iterrows():
             comp_name = str(row["Compound Name"]).strip()
             sq = float(row["S-Q %"])
@@ -247,13 +253,11 @@ if txt_file and csv_file:
             c = colors[color_idx % len(colors)]
             pdf = str(row["PDF Name"]).strip()
             
-            # One line string for the legend
             pdf_str = f" - {pdf}" if pdf and pdf.lower() not in ["nan", "none"] else ""
             label_str = f"{comp_name}{pdf_str}"
             
             p_id = row["Peak Mapping (DO NOT EDIT)"]
             
-            # If the row has peak data, draw the sticks and add to legend
             if p_id in peaks:
                 data = peaks[p_id]
                 x = data['2theta']
@@ -265,15 +269,11 @@ if txt_file and csv_file:
                 
                 ax1.vlines(x, ymin=0, ymax=y, color=c, linewidth=2.0)
                 
-                # Only iterate the color if we actually drew peak data
                 color_idx += 1
             else:
-                # E.g. Amorphous content. Use grey for the donut.
                 c = "#aaaaaa"
 
-            # Add valid data to Donut
             if sq > 0:
-                # Wrap Pie chart names so they don't break the circle
                 wrapped_name = "\n".join(textwrap.wrap(comp_name, width=20))
                 donut_labels.append(wrapped_name)
                 donut_sizes.append(sq)
@@ -293,17 +293,7 @@ if txt_file and csv_file:
         ax1.spines['right'].set_visible(False)
         ax1.spines['left'].set_visible(False)
 
-        # ALIGN LEGEND TO BOTTOM X-AXIS, UNDERNEATH DONUT CHART
-        legend_font = max(10, base_font - 2) 
-        ax1.legend(
-            legend_handles, legend_labels, 
-            fontsize=legend_font, 
-            frameon=False, 
-            loc='lower left', 
-            bbox_to_anchor=(1.05, 0.0) # 1.05 puts it right of ax1. 0.0 aligns it perfectly with bottom X-axis.
-        )
-
-        # AXIS 2: DONUT CHART
+        # AXIS 2: DONUT CHART (Now forced to the top right)
         if len(donut_sizes) > 0:
             wedges, texts, autotexts = ax2.pie(
                 donut_sizes, labels=donut_labels, autopct='%1.1f%%', 
@@ -325,8 +315,17 @@ if txt_file and csv_file:
         else:
             ax2.axis('off')
 
-        plt.subplots_adjust(right=0.9)
-        
+        # --- NEW LEGEND PLACEMENT ---
+        legend_font = max(10, base_font - 2) 
+        # Anchor the legend to the absolute bottom left of ax2's coordinate space
+        ax1.legend(
+            legend_handles, legend_labels, 
+            fontsize=legend_font, 
+            frameon=False, 
+            loc='lower left', 
+            bbox_to_anchor=(1.05, 0.0) 
+        )
+
         st.pyplot(fig)
         
         buf = io.BytesIO()
